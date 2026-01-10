@@ -267,32 +267,95 @@ const ProtectedRoute = ({ children, role }: { children: React.ReactNode, role?: 
   return <>{children}</>;
 };
 
-// Secure Video Player with Auto-Complete Timer
+// Secure Video Player with Auto-Complete at 90% Progress
 const SecureVideoPlayer = ({ url, title, videoId, onComplete }: { url: string, title: string, videoId: number, onComplete: () => void }) => {
-  const [timeLeft, setTimeLeft] = useState(120); // 2 minutes in seconds
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [hasCompleted, setHasCompleted] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const watchTimeRef = useRef(0); // Track cumulative watch time
+  const lastUpdateRef = useRef(Date.now());
+  const isPlayingRef = useRef(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    // Reset timer on video change
-    setTimeLeft(120);
-    
-    if (timerRef.current) clearInterval(timerRef.current);
+    // Reset state on video change
+    setHasCompleted(false);
+    watchTimeRef.current = 0;
+    lastUpdateRef.current = Date.now();
+    isPlayingRef.current = false;
 
-    timerRef.current = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          if (timerRef.current) clearInterval(timerRef.current);
-          onComplete(); // Trigger completion
-          return 0;
+    // Parse video duration from data if available (you can add this to VideoData type)
+    // For now, we'll use a default estimation
+    const estimatedDuration = 600; // 10 minutes default
+    const completionThreshold = estimatedDuration * 0.9; // 90% = 540 seconds
+
+    // Track active watching time
+    const updateWatchTime = () => {
+      if (isPlayingRef.current) {
+        const now = Date.now();
+        const elapsed = (now - lastUpdateRef.current) / 1000; // Convert to seconds
+        watchTimeRef.current += elapsed;
+        lastUpdateRef.current = now;
+
+        // Check if we've reached 90%
+        if (watchTimeRef.current >= completionThreshold && !hasCompleted) {
+          setHasCompleted(true);
+          onComplete(); // Silently mark as complete
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+          }
         }
-        return prev - 1;
-      });
-    }, 1000);
+      } else {
+        lastUpdateRef.current = Date.now(); // Reset timestamp when not playing
+      }
+    };
+
+    // User interaction handlers
+    const handleUserInteraction = () => {
+      if (!isPlayingRef.current) {
+        isPlayingRef.current = true;
+        lastUpdateRef.current = Date.now();
+      }
+    };
+
+    const handlePause = () => {
+      if (isPlayingRef.current) {
+        // Update one final time before pausing
+        const now = Date.now();
+        const elapsed = (now - lastUpdateRef.current) / 1000;
+        watchTimeRef.current += elapsed;
+        isPlayingRef.current = false;
+      }
+    };
+
+    // Start tracking interval
+    intervalRef.current = setInterval(updateWatchTime, 2000); // Update every 2 seconds
+
+    // Listen for user interactions that indicate video is playing
+    const iframeElement = iframeRef.current;
+    if (iframeElement) {
+      iframeElement.addEventListener('mouseenter', handleUserInteraction);
+      iframeElement.addEventListener('click', handleUserInteraction);
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        handlePause();
+      }
+    });
+
+    // Assume video starts playing on mount (user clicked to watch)
+    handleUserInteraction();
 
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+      if (iframeElement) {
+        iframeElement.removeEventListener('mouseenter', handleUserInteraction);
+        iframeElement.removeEventListener('click', handleUserInteraction);
+      }
     };
-  }, [videoId, onComplete]);
+  }, [videoId, onComplete, hasCompleted]);
 
   const getEmbedUrl = (driveUrl: string) => {
     const match = driveUrl.match(/\/d\/(.+?)\//);
@@ -314,6 +377,7 @@ const SecureVideoPlayer = ({ url, title, videoId, onComplete }: { url: string, t
       />
       
       <iframe 
+        ref={iframeRef}
         src={embedUrl}
         className="w-full h-full"
         allow="autoplay; encrypted-media"
@@ -321,7 +385,7 @@ const SecureVideoPlayer = ({ url, title, videoId, onComplete }: { url: string, t
         sandbox="allow-scripts allow-same-origin allow-presentation"
       ></iframe>
       
-      {/* Timer Logic runs in background, visual hidden as requested */}
+      {/* Progress tracking runs silently in background - 90% = auto-complete */}
     </div>
   );
 };
