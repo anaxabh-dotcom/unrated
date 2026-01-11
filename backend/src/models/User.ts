@@ -1,5 +1,11 @@
 import mongoose from 'mongoose';
 
+export interface IPayment {
+  amount: number;
+  date: string;
+  description?: string;
+}
+
 export interface IUser extends mongoose.Document {
   username: string;
   password: string;
@@ -9,6 +15,9 @@ export interface IUser extends mongoose.Document {
   starred: number[];
   notes: Map<number, string>;
   checkIns: string[];
+  // Billing & Payment fields
+  totalPaid: number; // Total amount paid by user
+  payments: IPayment[]; // Payment history with dates
   createdAt: Date;
   updatedAt: Date;
 }
@@ -49,6 +58,18 @@ const userSchema = new mongoose.Schema<IUser>({
   },
   checkIns: {
     type: [String],
+    default: []
+  },
+  totalPaid: {
+    type: Number,
+    default: 0
+  },
+  payments: {
+    type: [{
+      amount: { type: Number, required: true },
+      date: { type: String, required: true },
+      description: { type: String, default: '' }
+    }],
     default: []
   }
 }, {

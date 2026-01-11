@@ -64,6 +64,16 @@ export const api = {
     return response.json();
   },
 
+  // Update user payment (admin only - requires authentication)
+  updateUserPayment: async (id: string, amount: number, date: string, description: string, action: 'add' | 'set') => {
+    const response = await fetch(`${API_URL}/users/${id}/payment`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ amount, date, description, action })
+    });
+    return response.json();
+  },
+
   // Update progress
   updateProgress: async (userId: string, videoId: number) => {
     const response = await fetch(`${API_URL}/users/${userId}/progress`, {

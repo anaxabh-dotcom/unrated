@@ -14,6 +14,12 @@ export interface VideoData {
   watched: boolean;
 }
 
+export interface Payment {
+  amount: number;
+  date: string;
+  description?: string;
+}
+
 export interface User {
   _id: string;
   username: string;
@@ -24,6 +30,8 @@ export interface User {
   starred?: number[]; // Array of starred video IDs
   notes?: Record<number, string>; // Map video ID to note content
   checkIns?: string[]; // Array of ISO date strings for daily logins
+  totalPaid?: number; // Total amount paid
+  payments?: Payment[]; // Payment history
 }
 
 export type AuthState = {

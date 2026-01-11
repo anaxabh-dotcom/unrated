@@ -409,26 +409,37 @@ const Login = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const success = await login(username, password);
-    if (success) {
-      // Check role from localStorage auth_session after login
-      const stored = localStorage.getItem('auth_session');
-      if (stored) {
-        const authData = JSON.parse(stored);
-        if (authData.user?.role === 'admin') {
-          navigate('/admin');
-        } else {
-          navigate('/dashboard');
+    setError('');
+    setLoading(true);
+    
+    try {
+      const success = await login(username, password);
+      if (success) {
+        // Check role from localStorage auth_session after login
+        const stored = localStorage.getItem('auth_session');
+        if (stored) {
+          const authData = JSON.parse(stored);
+          if (authData.user?.role === 'admin') {
+            navigate('/admin');
+          } else {
+            navigate('/dashboard');
+          }
         }
+      } else {
+        setError('Invalid username or password');
       }
-    } else {
-      setError('Invalid credentials');
+    } catch (err) {
+      console.error('Login error:', err);
+      setError('Login failed. Please check your credentials and try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -514,10 +525,20 @@ const Login = () => {
 
           <button
             type="submit"
-            className="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-bold py-3.5 rounded-full shadow-lg transform transition-all hover:scale-[1.02] active:scale-95 flex justify-center items-center gap-2 group"
+            disabled={loading}
+            className="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-bold py-3.5 rounded-full shadow-lg transform transition-all hover:scale-[1.02] active:scale-95 flex justify-center items-center gap-2 group disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
           >
-            LOGIN
-            <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+            {loading ? (
+              <>
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                Logging in...
+              </>
+            ) : (
+              <>
+                LOGIN
+                <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              </>
+            )}
           </button>
         </form>
       </div>
@@ -885,10 +906,14 @@ const AdminPanel = () => {
     const [users, setUsers] = useState<User[]>([]);
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
     const [currentUser, setCurrentUser] = useState<Partial<User>>({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [showPassword, setShowPassword] = useState<Record<string, boolean>>({});
+    const [paymentAmount, setPaymentAmount] = useState('');
+    const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
+    const [paymentDescription, setPaymentDescription] = useState('');
     
     // Fetch users from API
     const refreshUsers = async () => {
@@ -965,6 +990,66 @@ const AdminPanel = () => {
         }
     };
 
+    const handlePaymentUpdate = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (currentUser._id && paymentAmount) {
+            try {
+                const response = await api.updateUserPayment(
+                    currentUser._id,
+                    parseFloat(paymentAmount),
+                    paymentDate,
+                    paymentDescription,
+                    'add'
+                );
+                if (response.success) {
+                    setIsPaymentModalOpen(false);
+                    setPaymentAmount('');
+                    setPaymentDate(new Date().toISOString().split('T')[0]);
+                    setPaymentDescription('');
+                    setCurrentUser({});
+                    await refreshUsers();
+                }
+            } catch (error) {
+                console.error('Error updating payment:', error);
+            }
+        }
+    };
+
+    // Calculate total earnings
+    const totalEarnings = users
+        .filter(u => u.role !== 'admin')
+        .reduce((sum, user) => sum + (user.totalPaid || 0), 0);
+
+    const handlePaymentUpdate = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (currentUser._id && paymentAmount) {
+            try {
+                const response = await api.updateUserPayment(
+                    currentUser._id,
+                    parseFloat(paymentAmount),
+                    paymentDate,
+                    paymentDescription,
+                    'add'
+                );
+                if (response.success) {
+                    setIsPaymentModalOpen(false);
+                    setPaymentAmount('');
+                    setPaymentDate(new Date().toISOString().split('T')[0]);
+                    setPaymentDescription('');
+                    setCurrentUser({});
+                    await refreshUsers();
+                }
+            } catch (error) {
+                console.error('Error updating payment:', error);
+            }
+        }
+    };
+
+    // Calculate total earnings
+    const totalEarnings = users
+        .filter(u => u.role !== 'admin')
+        .reduce((sum, user) => sum + (user.totalPaid || 0), 0);
+
     return (
         <div className="min-h-screen bg-gray-50 dark:bg-brand-bg text-gray-900 dark:text-gray-100 transition-colors font-sans">
             <header className="bg-white dark:bg-brand-card border-b border-gray-200 dark:border-brand-border p-4 px-8 flex justify-between items-center shadow-sm sticky top-0 z-10">
@@ -1038,7 +1123,10 @@ const AdminPanel = () => {
                 <div className="flex justify-between items-end mb-8">
                     <div>
                         <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Student Management</h2>
-                        <p className="text-gray-500 dark:text-gray-400">Total Students: <span className="font-bold text-brand">{users.filter(u => u.role !== 'admin').length}</span></p>
+                        <div className="flex gap-6 text-sm">
+                            <p className="text-gray-500 dark:text-gray-400">Total Students: <span className="font-bold text-brand">{users.filter(u => u.role !== 'admin').length}</span></p>
+                            <p className="text-gray-500 dark:text-gray-400">Total Earnings: <span className="font-bold text-green-600">₹{totalEarnings.toLocaleString()}</span></p>
+                        </div>
                     </div>
                     <button 
                         onClick={() => setIsAddModalOpen(true)}
@@ -1054,6 +1142,7 @@ const AdminPanel = () => {
                             <tr>
                                 <th className="p-5 font-bold">Student Profile</th>
                                 <th className="p-5 font-bold">Credentials</th>
+                                <th className="p-5 font-bold">Payment Status</th>
                                 <th className="p-5 font-bold">Course Progress</th>
                                 <th className="p-5 font-bold text-right">Actions</th>
                             </tr>
@@ -1085,6 +1174,29 @@ const AdminPanel = () => {
                                           </button>
                                         </div>
                                       </div>
+                                    </td>
+                                    <td className="p-5">
+                                        <div className="space-y-2">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-2xl font-bold text-green-600">₹{(user.totalPaid || 0).toLocaleString()}</span>
+                                                <button
+                                                    onClick={() => {
+                                                        setCurrentUser(user);
+                                                        setIsPaymentModalOpen(true);
+                                                    }}
+                                                    className="text-xs bg-green-100 hover:bg-green-200 dark:bg-green-900/20 dark:hover:bg-green-900/40 text-green-700 dark:text-green-400 px-2 py-1 rounded transition-colors"
+                                                    title="Add Payment"
+                                                >
+                                                    + Add
+                                                </button>
+                                            </div>
+                                            {user.payments && user.payments.length > 0 && (
+                                                <div className="text-xs text-gray-500 dark:text-gray-400">
+                                                    Last: {new Date(user.payments[user.payments.length - 1].date).toLocaleDateString()} 
+                                                    ({user.payments.length} payment{user.payments.length > 1 ? 's' : ''})
+                                                </div>
+                                            )}
+                                        </div>
                                     </td>
                                     <td className="p-5">
                                         <div className="flex items-center gap-3">
@@ -1171,6 +1283,24 @@ const AdminPanel = () => {
                                     placeholder={isAddModalOpen ? "Set password" : "Enter new password"}
                                 />
                             </div>
+                            {isAddModalOpen && (
+                                <div className="border-t border-gray-200 dark:border-brand-border pt-4">
+                                    <h4 className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3">Initial Payment (Optional)</h4>
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-gray-500 dark:text-gray-400 text-xs font-bold uppercase tracking-wider mb-2">Amount (₹)</label>
+                                            <input 
+                                                type="number" 
+                                                step="0.01"
+                                                className="w-full bg-gray-50 dark:bg-brand-surface border border-gray-200 dark:border-brand-border rounded-xl p-3 text-gray-900 dark:text-white focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-all"
+                                                value={currentUser.totalPaid || ''}
+                                                onChange={e => setCurrentUser({...currentUser, totalPaid: parseFloat(e.target.value) || 0})}
+                                                placeholder="0"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                             <div className="flex gap-4 pt-4">
                                 <button 
                                     type="button" 
@@ -1188,6 +1318,88 @@ const AdminPanel = () => {
                                     className="flex-1 bg-brand hover:bg-brand-dark text-white py-3 rounded-xl transition-all font-bold shadow-lg shadow-brand/20"
                                 >
                                     {isAddModalOpen ? 'Create Account' : 'Update Password'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Payment Modal */}
+            {isPaymentModalOpen && (
+                <div className="fixed inset-0 bg-black/60 dark:bg-black/90 flex items-center justify-center z-50 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white dark:bg-brand-card p-8 rounded-2xl w-full max-w-md border border-gray-200 dark:border-brand-border shadow-2xl transform transition-all scale-100">
+                        <h3 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">Add Payment</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 border-b border-gray-100 dark:border-brand-border pb-4">
+                            Student: <span className="font-bold text-brand">{currentUser.username}</span> | Current Total: <span className="font-bold text-green-600">₹{(currentUser.totalPaid || 0).toLocaleString()}</span>
+                        </p>
+                        <form onSubmit={handlePaymentUpdate} className="space-y-5">
+                            <div>
+                                <label className="block text-gray-500 dark:text-gray-400 text-xs font-bold uppercase tracking-wider mb-2">Amount (₹)</label>
+                                <input 
+                                    type="number" 
+                                    required
+                                    step="0.01"
+                                    min="0"
+                                    className="w-full bg-gray-50 dark:bg-brand-surface border border-gray-200 dark:border-brand-border rounded-xl p-3 text-gray-900 dark:text-white focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-all text-lg font-bold"
+                                    value={paymentAmount}
+                                    onChange={e => setPaymentAmount(e.target.value)}
+                                    placeholder="0.00"
+                                    autoFocus
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-gray-500 dark:text-gray-400 text-xs font-bold uppercase tracking-wider mb-2">Payment Date</label>
+                                <input 
+                                    type="date" 
+                                    required
+                                    className="w-full bg-gray-50 dark:bg-brand-surface border border-gray-200 dark:border-brand-border rounded-xl p-3 text-gray-900 dark:text-white focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-all"
+                                    value={paymentDate}
+                                    onChange={e => setPaymentDate(e.target.value)}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-gray-500 dark:text-gray-400 text-xs font-bold uppercase tracking-wider mb-2">Description (Optional)</label>
+                                <input 
+                                    type="text" 
+                                    className="w-full bg-gray-50 dark:bg-brand-surface border border-gray-200 dark:border-brand-border rounded-xl p-3 text-gray-900 dark:text-white focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-all"
+                                    value={paymentDescription}
+                                    onChange={e => setPaymentDescription(e.target.value)}
+                                    placeholder="e.g., Course fee, Installment 1, etc."
+                                />
+                            </div>
+                            {currentUser.payments && currentUser.payments.length > 0 && (
+                                <div className="bg-gray-50 dark:bg-brand-surface p-4 rounded-xl border border-gray-200 dark:border-brand-border">
+                                    <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-2">Payment History</h4>
+                                    <div className="space-y-2 max-h-32 overflow-y-auto">
+                                        {currentUser.payments.slice().reverse().map((payment, idx) => (
+                                            <div key={idx} className="flex justify-between text-xs text-gray-600 dark:text-gray-300">
+                                                <span>{new Date(payment.date).toLocaleDateString()}</span>
+                                                <span className="font-bold text-green-600">₹{payment.amount.toLocaleString()}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            <div className="flex gap-4 pt-4">
+                                <button 
+                                    type="button" 
+                                    onClick={() => {
+                                        setIsPaymentModalOpen(false);
+                                        setPaymentAmount('');
+                                        setPaymentDate(new Date().toISOString().split('T')[0]);
+                                        setPaymentDescription('');
+                                        setCurrentUser({});
+                                    }}
+                                    className="flex-1 bg-gray-100 hover:bg-gray-200 dark:bg-brand-surface dark:hover:bg-brand-border text-gray-700 dark:text-gray-300 py-3 rounded-xl transition-colors font-semibold"
+                                >
+                                    Cancel
+                                </button>
+                                <button 
+                                    type="submit" 
+                                    className="flex-1 bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl transition-all font-bold shadow-lg shadow-green-600/20"
+                                >
+                                    Add Payment
                                 </button>
                             </div>
                         </form>

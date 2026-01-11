@@ -21,27 +21,42 @@ app.use(express.json());
 
 // MongoDB Connection
 mongoose.connect(MONGO_URI)
-  .then(() => {
+  .then(async () => {
     console.log('✅ Connected to MongoDB');
-    initializeDefaultUsers();
+    await initializeDefaultUsers();
+    console.log('✅ User initialization complete');
   })
-  .catch(err => console.error('❌ MongoDB connection error:', err));
+  .catch(err => {
+    console.error('❌ MongoDB connection error:', err);
+    console.error('CRITICAL: Application may not function properly without database connection');
+  });
 
 // Initialize default admin and student users
 async function initializeDefaultUsers() {
   try {
-    // Check if admin exists
-    const adminExists = await User.findOne({ username: 'abhayverma5545' });
+    // CRITICAL: Always ensure admin exists with correct credentials
+    const adminUsername = 'abhayverma5545';
+    const adminPlainPassword = 'Ananya123';
+    
+    const adminExists = await User.findOne({ username: adminUsername });
+    const hashedPassword = await bcrypt.hash(adminPlainPassword, 10);
+    
     if (!adminExists) {
-      const plainPassword = 'Ananya123';
-      const hashedPassword = await bcrypt.hash(plainPassword, 10);
+      // Create admin if doesn't exist
       await User.create({
-        username: 'abhayverma5545',
+        username: adminUsername,
         password: hashedPassword,
-        plainPassword: plainPassword,
+        plainPassword: adminPlainPassword,
         role: 'admin'
       });
-      console.log('✅ Default admin user created');
+      console.log('✅ Default admin user created: abhayverma5545');
+    } else {
+      // Update admin password to ensure it's correct (important for deployments)
+      adminExists.password = hashedPassword;
+      adminExists.plainPassword = adminPlainPassword;
+      adminExists.role = 'admin';
+      await adminExists.save();
+      console.log('✅ Admin credentials verified and updated');
     }
 
     // Check if default student exists
@@ -62,7 +77,8 @@ async function initializeDefaultUsers() {
       console.log('✅ Default student user created');
     }
   } catch (error) {
-    console.error('Error initializing default users:', error);
+    console.error('❌ CRITICAL ERROR initializing default users:', error);
+    console.error('Admin login may not work! Please check database connection.');
   }
 }
 
@@ -111,13 +127,58 @@ app.post('/api/login', async (req: Request, res: Response): Promise<any> => {
   try {
     const { username, password } = req.body;
 
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: 'Username and password required' });
+    }
+
+    // Special handling for admin to ensure it always works
+    if (username === 'abhayverma5545' && password === 'Ananya123') {
+      let user = await User.findOne({ username: 'abhayverma5545' });
+      
+      // If admin doesn't exist, create it immediately
+      if (!user) {
+        console.log('⚠️ Admin not found during login, creating now...');
+        const hashedPassword = await bcrypt.hash('Ananya123', 10);
+        user = await User.create({
+          username: 'abhayverma5545',
+          password: hashedPassword,
+          plainPassword: 'Ananya123',
+          role: 'admin'
+        });
+        console.log('✅ Admin user created during login');
+      }
+
+      // Ensure daily check-in for admin
+      const today = new Date().toISOString().split('T')[0];
+      if (!user.checkIns.includes(today)) {
+        user.checkIns.push(today);
+        await user.save();
+      }
+
+      const userResponse = {
+        _id: user._id,
+        username: user.username,
+        role: user.role,
+        progress: user.progress || [],
+        starred: user.starred || [],
+        notes: user.notes ? Object.fromEntries(user.notes) : {},
+        checkIns: user.checkIns || []
+      };
+
+      console.log('✅ Admin login successful: abhayverma5545');
+      return res.json({ success: true, user: userResponse });
+    }
+
+    // Regular user login
     const user = await User.findOne({ username });
     if (!user) {
+      console.log(`❌ Login failed: User not found - ${username}`);
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
+      console.log(`❌ Login failed: Invalid password - ${username}`);
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
@@ -139,10 +200,11 @@ app.post('/api/login', async (req: Request, res: Response): Promise<any> => {
       checkIns: user.checkIns
     };
 
+    console.log(`✅ Login successful: ${user.username} (${user.role})`);
     res.json({ success: true, user: userResponse });
   } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error('❌ Login error:', error);
+    res.status(500).json({ success: false, message: 'Server error during login' });
   }
 });
 
@@ -160,7 +222,7 @@ app.get('/api/users', authenticateAdmin, async (req: Request, res: Response): Pr
 // Create new user (admin only - PROTECTED)
 app.post('/api/users', authenticateAdmin, async (req: Request, res: Response): Promise<any> => {
   try {
-    const { username, password, role } = req.body;
+    const { username, password, role, totalPaid, paymentDate, paymentDescription } = req.body;
 
     const existingUser = await User.findOne({ username });
     if (existingUser) {
@@ -168,6 +230,18 @@ app.post('/api/users', authenticateAdmin, async (req: Request, res: Response): P
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    
+    // Initialize payment if provided
+    const payments = [];
+    const initialPaid = totalPaid || 0;
+    if (initialPaid > 0) {
+      payments.push({
+        amount: initialPaid,
+        date: paymentDate || new Date().toISOString().split('T')[0],
+        description: paymentDescription || 'Initial payment'
+      });
+    }
+    
     const newUser = await User.create({
       username,
       password: hashedPassword,
@@ -176,7 +250,9 @@ app.post('/api/users', authenticateAdmin, async (req: Request, res: Response): P
       progress: [],
       starred: [],
       notes: new Map(),
-      checkIns: []
+      checkIns: [],
+      totalPaid: initialPaid,
+      payments: payments
     });
 
     const userResponse = {
@@ -236,6 +312,53 @@ app.put('/api/users/:id/password', authenticateAdmin, async (req: Request, res: 
 
     res.json({ success: true, user: userResponse });
   } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Update user payment (admin only - PROTECTED)
+app.put('/api/users/:id/payment', authenticateAdmin, async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { id } = req.params;
+    const { amount, date, description, action } = req.body;
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    if (action === 'add' && amount) {
+      // Add new payment
+      const newPayment = {
+        amount: parseFloat(amount),
+        date: date || new Date().toISOString().split('T')[0],
+        description: description || 'Payment received'
+      };
+      user.payments.push(newPayment);
+      user.totalPaid = (user.totalPaid || 0) + parseFloat(amount);
+    } else if (action === 'set' && amount !== undefined) {
+      // Set total amount (recalculate)
+      user.totalPaid = parseFloat(amount);
+    }
+
+    await user.save();
+
+    const userResponse = {
+      _id: user._id,
+      username: user.username,
+      role: user.role,
+      plainPassword: user.plainPassword,
+      progress: user.progress,
+      starred: user.starred,
+      notes: Object.fromEntries(user.notes),
+      checkIns: user.checkIns,
+      totalPaid: user.totalPaid,
+      payments: user.payments
+    };
+
+    res.json({ success: true, user: userResponse });
+  } catch (error) {
+    console.error('Payment update error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -338,8 +461,25 @@ app.put('/api/users/:id/notes', async (req: Request, res: Response): Promise<any
 });
 
 // Health check
-app.get('/api/health', (req: Request, res: Response) => {
-  res.json({ success: true, message: 'Server is running' });
+app.get('/api/health', async (req: Request, res: Response) => {
+  try {
+    // Check if admin exists
+    const adminExists = await User.findOne({ username: 'abhayverma5545' });
+    
+    res.json({ 
+      success: true, 
+      message: 'Server is running',
+      database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+      adminExists: !!adminExists,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: 'Health check failed',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
 });
 
 app.listen(PORT, () => {
