@@ -267,7 +267,7 @@ const ProtectedRoute = ({ children, role }: { children: React.ReactNode, role?: 
   return <>{children}</>;
 };
 
-// Secure Video Player with Auto-Complete at 90% Progress
+// Secure Video Player with Auto-Complete at 80% Progress
 const SecureVideoPlayer = ({ url, title, videoId, onComplete }: { url: string, title: string, videoId: number, onComplete: () => void }) => {
   const [hasCompleted, setHasCompleted] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -286,7 +286,7 @@ const SecureVideoPlayer = ({ url, title, videoId, onComplete }: { url: string, t
     // Parse video duration from data if available (you can add this to VideoData type)
     // For now, we'll use a default estimation
     const estimatedDuration = 600; // 10 minutes default
-    const completionThreshold = estimatedDuration * 0.9; // 90% = 540 seconds
+    const completionThreshold = estimatedDuration * 0.8; // 80% = 480 seconds
 
     // Track active watching time
     const updateWatchTime = () => {
@@ -296,7 +296,7 @@ const SecureVideoPlayer = ({ url, title, videoId, onComplete }: { url: string, t
         watchTimeRef.current += elapsed;
         lastUpdateRef.current = now;
 
-        // Check if we've reached 90%
+        // Check if we've reached 80%
         if (watchTimeRef.current >= completionThreshold && !hasCompleted) {
           setHasCompleted(true);
           onComplete(); // Silently mark as complete
@@ -385,7 +385,7 @@ const SecureVideoPlayer = ({ url, title, videoId, onComplete }: { url: string, t
         sandbox="allow-scripts allow-same-origin allow-presentation"
       ></iframe>
       
-      {/* Progress tracking runs silently in background - 90% = auto-complete */}
+      {/* Progress tracking runs silently in background - 80% = auto-complete */}
     </div>
   );
 };
@@ -514,7 +514,7 @@ const Dashboard = () => {
   const { authState, logout, updateProgress, toggleStar, saveNote } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [selectedVideo, setSelectedVideo] = useState<VideoData>(videosData[0]);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 768); // Start closed on mobile
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'videos' | 'assignments' | 'starred'>('videos');
   const [noteContent, setNoteContent] = useState('');
@@ -560,8 +560,16 @@ const Dashboard = () => {
 
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-brand-bg overflow-hidden transition-colors font-sans">
+      {/* Mobile Backdrop Overlay */}
+      {sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-10 md:hidden backdrop-blur-sm"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+      
       {/* Sidebar */}
-      <div className={`${sidebarOpen ? 'w-80' : 'w-0'} bg-white/90 dark:bg-brand-card/95 backdrop-blur-md border-r border-gray-200 dark:border-brand-border transition-all duration-300 flex flex-col z-20 absolute md:relative h-full shadow-2xl`}>
+      <div className={`${sidebarOpen ? 'w-full md:w-80' : 'w-0'} bg-white/90 dark:bg-brand-card/95 backdrop-blur-md border-r border-gray-200 dark:border-brand-border transition-all duration-300 flex flex-col z-20 absolute md:relative h-full shadow-2xl overflow-hidden max-w-[320px] md:max-w-none`}>
         <div className="p-5 border-b border-gray-100 dark:border-brand-border flex justify-between items-center bg-gradient-to-r from-transparent to-gray-50/50 dark:to-white/5">
             <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-brand to-red-500">Course Content</h1>
             <button onClick={() => setSidebarOpen(false)} className="md:hidden text-gray-500 dark:text-gray-400 hover:text-red-500 transition-colors"><X /></button>

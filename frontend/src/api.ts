@@ -1,6 +1,21 @@
 // Use environment variable or fallback to localhost for development
 const API_URL = `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api`;
 
+// Helper function to get authorization header
+const getAuthHeaders = () => {
+  const authSession = localStorage.getItem('auth_session');
+  if (authSession) {
+    const { user } = JSON.parse(authSession);
+    if (user && user._id) {
+      return {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${user._id}`
+      };
+    }
+  }
+  return { 'Content-Type': 'application/json' };
+};
+
 export const api = {
   // Login
   login: async (username: string, password: string) => {
@@ -12,26 +27,29 @@ export const api = {
     return response.json();
   },
 
-  // Get all users (admin)
+  // Get all users (admin only - requires authentication)
   getUsers: async () => {
-    const response = await fetch(`${API_URL}/users`);
+    const response = await fetch(`${API_URL}/users`, {
+      headers: getAuthHeaders()
+    });
     return response.json();
   },
 
-  // Create user (admin)
+  // Create user (admin only - requires authentication)
   createUser: async (username: string, password: string, role: 'admin' | 'student') => {
     const response = await fetch(`${API_URL}/users`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ username, password, role })
     });
     return response.json();
   },
 
-  // Delete user (admin)
+  // Delete user (admin only - requires authentication)
   deleteUser: async (id: string) => {
     const response = await fetch(`${API_URL}/users/${id}`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: getAuthHeaders()
     });
     return response.json();
   },

@@ -62,6 +62,44 @@ async function initializeDefaultUsers() {
   }
 }
 
+// --- MIDDLEWARE ---
+
+// Authentication middleware to verify user role
+interface AuthRequest extends Request {
+  userId?: string;
+  userRole?: string;
+}
+
+const authenticateAdmin = async (req: AuthRequest, res: Response, next: Function): Promise<any> => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ success: false, message: 'Unauthorized - No token provided' });
+    }
+
+    // Extract userId from Authorization header (format: "Bearer userId")
+    const token = authHeader.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ success: false, message: 'Unauthorized - Invalid token format' });
+    }
+
+    const user = await User.findById(token);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Unauthorized - Invalid user' });
+    }
+
+    if (user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Forbidden - Admin access required' });
+    }
+
+    req.userId = user._id.toString();
+    req.userRole = user.role;
+    next();
+  } catch (error) {
+    return res.status(401).json({ success: false, message: 'Unauthorized - Invalid token' });
+  }
+};
+
 // --- API ROUTES ---
 
 // Login
@@ -104,8 +142,8 @@ app.post('/api/login', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-// Get all users (admin only)
-app.get('/api/users', async (req: Request, res: Response): Promise<any> => {
+// Get all users (admin only - PROTECTED)
+app.get('/api/users', authenticateAdmin, async (req: Request, res: Response): Promise<any> => {
   try {
     const users = await User.find().select('-password');
     res.json({ success: true, users });
@@ -114,8 +152,8 @@ app.get('/api/users', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-// Create new user (admin)
-app.post('/api/users', async (req: Request, res: Response): Promise<any> => {
+// Create new user (admin only - PROTECTED)
+app.post('/api/users', authenticateAdmin, async (req: Request, res: Response): Promise<any> => {
   try {
     const { username, password, role } = req.body;
 
@@ -152,8 +190,8 @@ app.post('/api/users', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-// Delete user (admin)
-app.delete('/api/users/:id', async (req: Request, res: Response): Promise<any> => {
+// Delete user (admin only - PROTECTED)
+app.delete('/api/users/:id', authenticateAdmin, async (req: Request, res: Response): Promise<any> => {
   try {
     const { id } = req.params;
     await User.findByIdAndDelete(id);
