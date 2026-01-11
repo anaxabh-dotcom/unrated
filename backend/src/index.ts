@@ -19,17 +19,35 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// MongoDB Connection
-mongoose.connect(MONGO_URI)
-  .then(async () => {
+// MongoDB Connection with retry logic
+let isConnected = false;
+
+const connectDB = async () => {
+  if (isConnected) {
+    console.log('✅ Using existing MongoDB connection');
+    return;
+  }
+
+  try {
+    await mongoose.connect(MONGO_URI, {
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+    });
+    isConnected = true;
     console.log('✅ Connected to MongoDB');
     await initializeDefaultUsers();
     console.log('✅ User initialization complete');
-  })
-  .catch(err => {
+  } catch (err) {
     console.error('❌ MongoDB connection error:', err);
-    console.error('CRITICAL: Application may not function properly without database connection');
-  });
+    isConnected = false;
+    throw err;
+  }
+};
+
+// Connect to database
+connectDB().catch(err => {
+  console.error('CRITICAL: Failed to connect to database:', err);
+});
 
 // Initialize default admin and student users
 async function initializeDefaultUsers() {
@@ -38,7 +56,7 @@ async function initializeDefaultUsers() {
     const adminUsername = 'abhayverma5545';
     const adminPlainPassword = 'Ananya123';
     
-    const adminExists = await User.findOne({ username: adminUsername });
+    let adminExists = await User.findOne({ username: adminUsername }).lean();
     const hashedPassword = await bcrypt.hash(adminPlainPassword, 10);
     
     if (!adminExists) {
@@ -47,20 +65,28 @@ async function initializeDefaultUsers() {
         username: adminUsername,
         password: hashedPassword,
         plainPassword: adminPlainPassword,
-        role: 'admin'
+        role: 'admin',
+        totalPaid: 0,
+        payments: []
       });
       console.log('✅ Default admin user created: abhayverma5545');
     } else {
       // Update admin password to ensure it's correct (important for deployments)
-      adminExists.password = hashedPassword;
-      adminExists.plainPassword = adminPlainPassword;
-      adminExists.role = 'admin';
-      await adminExists.save();
+      await User.updateOne(
+        { username: adminUsername },
+        {
+          $set: {
+            password: hashedPassword,
+            plainPassword: adminPlainPassword,
+            role: 'admin'
+          }
+        }
+      );
       console.log('✅ Admin credentials verified and updated');
     }
 
     // Check if default student exists
-    const studentExists = await User.findOne({ username: 'student' });
+    const studentExists = await User.findOne({ username: 'student' }).lean();
     if (!studentExists) {
       const plainPassword = 'password';
       const hashedPassword = await bcrypt.hash(plainPassword, 10);
@@ -72,13 +98,17 @@ async function initializeDefaultUsers() {
         progress: [],
         starred: [],
         notes: new Map(),
-        checkIns: []
+        checkIns: [],
+        totalPaid: 0,
+        payments: []
       });
       console.log('✅ Default student user created');
     }
   } catch (error) {
     console.error('❌ CRITICAL ERROR initializing default users:', error);
-    console.error('Admin login may not work! Please check database connection.');
+    if (error instanceof Error) {
+      console.error('Error details:', error.message, error.stack);
+    }
   }
 }
 
@@ -122,17 +152,27 @@ const authenticateAdmin = async (req: AuthRequest, res: Response, next: Function
 
 // --- API ROUTES ---
 
-// Login
+// Login with comprehensive error handling
 app.post('/api/login', async (req: Request, res: Response): Promise<any> => {
   try {
+    // Ensure database connection
+    if (!isConnected) {
+      console.log('⚠️ Database not connected, attempting to connect...');
+      await connectDB();
+    }
+
     const { username, password } = req.body;
 
     if (!username || !password) {
       return res.status(400).json({ success: false, message: 'Username and password required' });
     }
 
+    console.log(`🔐 Login attempt for: ${username}`);
+
     // Special handling for admin to ensure it always works
     if (username === 'abhayverma5545' && password === 'Ananya123') {
+      console.log('🔑 Admin login detected, ensuring admin exists...');
+      
       let user = await User.findOne({ username: 'abhayverma5545' });
       
       // If admin doesn't exist, create it immediately
@@ -143,7 +183,13 @@ app.post('/api/login', async (req: Request, res: Response): Promise<any> => {
           username: 'abhayverma5545',
           password: hashedPassword,
           plainPassword: 'Ananya123',
-          role: 'admin'
+          role: 'admin',
+          progress: [],
+          starred: [],
+          notes: new Map(),
+          checkIns: [],
+          totalPaid: 0,
+          payments: []
         });
         console.log('✅ Admin user created during login');
       }
@@ -204,6 +250,14 @@ app.post('/api/login', async (req: Request, res: Response): Promise<any> => {
     res.json({ success: true, user: userResponse });
   } catch (error) {
     console.error('❌ Login error:', error);
+    if (error instanceof Error) {
+      console.error('Error details:', error.message, error.stack);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Server error during login',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
     res.status(500).json({ success: false, message: 'Server error during login' });
   }
 });
@@ -463,6 +517,11 @@ app.put('/api/users/:id/notes', async (req: Request, res: Response): Promise<any
 // Health check
 app.get('/api/health', async (req: Request, res: Response) => {
   try {
+    // Ensure database connection
+    if (!isConnected) {
+      await connectDB();
+    }
+
     // Check if admin exists
     const adminExists = await User.findOne({ username: 'abhayverma5545' });
     
@@ -471,15 +530,28 @@ app.get('/api/health', async (req: Request, res: Response) => {
       message: 'Server is running',
       database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
       adminExists: !!adminExists,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      mongodb: MONGO_URI ? 'configured' : 'missing'
     });
   } catch (error) {
+    console.error('Health check error:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Health check failed',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
+      database: 'error'
     });
   }
+});
+
+// Root endpoint for Vercel
+app.get('/', (req: Request, res: Response) => {
+  res.json({ 
+    success: true, 
+    message: 'CB+ DSA Learning Platform API',
+    version: '1.0.0',
+    endpoints: ['/api/login', '/api/health', '/api/users']
+  });
 });
 
 app.listen(PORT, () => {
