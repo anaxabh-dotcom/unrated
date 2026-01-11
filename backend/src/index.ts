@@ -33,10 +33,12 @@ async function initializeDefaultUsers() {
     // Check if admin exists
     const adminExists = await User.findOne({ username: 'abhayverma5545' });
     if (!adminExists) {
-      const hashedPassword = await bcrypt.hash('Ananya123', 10);
+      const plainPassword = 'Ananya123';
+      const hashedPassword = await bcrypt.hash(plainPassword, 10);
       await User.create({
         username: 'abhayverma5545',
         password: hashedPassword,
+        plainPassword: plainPassword,
         role: 'admin'
       });
       console.log('✅ Default admin user created');
@@ -45,10 +47,12 @@ async function initializeDefaultUsers() {
     // Check if default student exists
     const studentExists = await User.findOne({ username: 'student' });
     if (!studentExists) {
-      const hashedPassword = await bcrypt.hash('password', 10);
+      const plainPassword = 'password';
+      const hashedPassword = await bcrypt.hash(plainPassword, 10);
       await User.create({
         username: 'student',
         password: hashedPassword,
+        plainPassword: plainPassword,
         role: 'student',
         progress: [],
         starred: [],
@@ -124,7 +128,7 @@ app.post('/api/login', async (req: Request, res: Response): Promise<any> => {
       await user.save();
     }
 
-    // Return user without password
+    // Return user without password (exclude plainPassword for students)
     const userResponse = {
       _id: user._id,
       username: user.username,
@@ -145,6 +149,7 @@ app.post('/api/login', async (req: Request, res: Response): Promise<any> => {
 // Get all users (admin only - PROTECTED)
 app.get('/api/users', authenticateAdmin, async (req: Request, res: Response): Promise<any> => {
   try {
+    // Select all fields except the hashed password, include plainPassword for admin
     const users = await User.find().select('-password');
     res.json({ success: true, users });
   } catch (error) {
@@ -166,6 +171,7 @@ app.post('/api/users', authenticateAdmin, async (req: Request, res: Response): P
     const newUser = await User.create({
       username,
       password: hashedPassword,
+      plainPassword: password,
       role: role || 'student',
       progress: [],
       starred: [],
@@ -196,6 +202,39 @@ app.delete('/api/users/:id', authenticateAdmin, async (req: Request, res: Respon
     const { id } = req.params;
     await User.findByIdAndDelete(id);
     res.json({ success: true, message: 'User deleted' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Update user password (admin only - PROTECTED)
+app.put('/api/users/:id/password', authenticateAdmin, async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { id } = req.params;
+    const { password } = req.body;
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    user.password = hashedPassword;
+    user.plainPassword = password;
+    await user.save();
+
+    const userResponse = {
+      _id: user._id,
+      username: user.username,
+      role: user.role,
+      plainPassword: user.plainPassword,
+      progress: user.progress,
+      starred: user.starred,
+      notes: Object.fromEntries(user.notes),
+      checkIns: user.checkIns
+    };
+
+    res.json({ success: true, user: userResponse });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error' });
   }

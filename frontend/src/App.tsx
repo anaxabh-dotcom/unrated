@@ -271,22 +271,29 @@ const ProtectedRoute = ({ children, role }: { children: React.ReactNode, role?: 
 const SecureVideoPlayer = ({ url, title, videoId, onComplete }: { url: string, title: string, videoId: number, onComplete: () => void }) => {
   const [hasCompleted, setHasCompleted] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const watchTimeRef = useRef(0); // Track cumulative watch time
+  const watchTimeRef = useRef(0); // Track cumulative watch time in seconds
   const lastUpdateRef = useRef(Date.now());
   const isPlayingRef = useRef(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { authState } = useAuth();
 
   useEffect(() => {
+    // Check if already completed
+    if (authState.user?.progress?.includes(videoId)) {
+      setHasCompleted(true);
+      return;
+    }
+
     // Reset state on video change
     setHasCompleted(false);
     watchTimeRef.current = 0;
     lastUpdateRef.current = Date.now();
     isPlayingRef.current = false;
 
-    // Parse video duration from data if available (you can add this to VideoData type)
-    // For now, we'll use a default estimation
-    const estimatedDuration = 600; // 10 minutes default
-    const completionThreshold = estimatedDuration * 0.8; // 80% = 480 seconds
+    // Estimated video duration (in seconds) - default 30 minutes
+    // Most lectures are 30-60 minutes, so we use 30 min * 60 = 1800 seconds
+    const estimatedDuration = 1800; // 30 minutes in seconds
+    const completionThreshold = estimatedDuration * 0.80; // 80% = 1440 seconds (24 minutes)
 
     // Track active watching time
     const updateWatchTime = () => {
@@ -296,10 +303,11 @@ const SecureVideoPlayer = ({ url, title, videoId, onComplete }: { url: string, t
         watchTimeRef.current += elapsed;
         lastUpdateRef.current = now;
 
-        // Check if we've reached 80%
+        // Check if we've reached 80% completion threshold
         if (watchTimeRef.current >= completionThreshold && !hasCompleted) {
           setHasCompleted(true);
-          onComplete(); // Silently mark as complete
+          onComplete(); // Mark as complete
+          console.log(`Video ${videoId} completed at 80% (${Math.round(watchTimeRef.current)}s of ${estimatedDuration}s)`);
           if (intervalRef.current) {
             clearInterval(intervalRef.current);
           }
@@ -309,7 +317,7 @@ const SecureVideoPlayer = ({ url, title, videoId, onComplete }: { url: string, t
       }
     };
 
-    // User interaction handlers
+    // User interaction handlers - assume video is playing when user interacts
     const handleUserInteraction = () => {
       if (!isPlayingRef.current) {
         isPlayingRef.current = true;
@@ -327,21 +335,26 @@ const SecureVideoPlayer = ({ url, title, videoId, onComplete }: { url: string, t
       }
     };
 
-    // Start tracking interval
-    intervalRef.current = setInterval(updateWatchTime, 2000); // Update every 2 seconds
+    // Start tracking interval - update every 3 seconds
+    intervalRef.current = setInterval(updateWatchTime, 3000);
 
     // Listen for user interactions that indicate video is playing
     const iframeElement = iframeRef.current;
     if (iframeElement) {
       iframeElement.addEventListener('mouseenter', handleUserInteraction);
       iframeElement.addEventListener('click', handleUserInteraction);
+      iframeElement.addEventListener('touchstart', handleUserInteraction);
     }
 
-    document.addEventListener('visibilitychange', () => {
+    // Handle tab visibility changes
+    const handleVisibilityChange = () => {
       if (document.hidden) {
         handlePause();
+      } else {
+        handleUserInteraction();
       }
-    });
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // Assume video starts playing on mount (user clicked to watch)
     handleUserInteraction();
@@ -353,9 +366,11 @@ const SecureVideoPlayer = ({ url, title, videoId, onComplete }: { url: string, t
       if (iframeElement) {
         iframeElement.removeEventListener('mouseenter', handleUserInteraction);
         iframeElement.removeEventListener('click', handleUserInteraction);
+        iframeElement.removeEventListener('touchstart', handleUserInteraction);
       }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [videoId, onComplete, hasCompleted]);
+  }, [videoId, onComplete, hasCompleted, authState.user]);
 
   const getEmbedUrl = (driveUrl: string) => {
     const match = driveUrl.match(/\/d\/(.+?)\//);
@@ -385,7 +400,7 @@ const SecureVideoPlayer = ({ url, title, videoId, onComplete }: { url: string, t
         sandbox="allow-scripts allow-same-origin allow-presentation"
       ></iframe>
       
-      {/* Progress tracking runs silently in background - 80% = auto-complete */}
+      {/* Silent progress tracking in background - 80% = auto-complete */}
     </div>
   );
 };
@@ -569,7 +584,7 @@ const Dashboard = () => {
       )}
       
       {/* Sidebar */}
-      <div className={`${sidebarOpen ? 'w-full md:w-80' : 'w-0'} bg-white/90 dark:bg-brand-card/95 backdrop-blur-md border-r border-gray-200 dark:border-brand-border transition-all duration-300 flex flex-col z-20 absolute md:relative h-full shadow-2xl overflow-hidden max-w-[320px] md:max-w-none`}>
+      <div className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} fixed md:relative md:translate-x-0 w-80 max-w-[85vw] bg-white/90 dark:bg-brand-card/95 backdrop-blur-md border-r border-gray-200 dark:border-brand-border transition-transform duration-300 flex flex-col z-20 h-full shadow-2xl overflow-hidden`}>
         <div className="p-5 border-b border-gray-100 dark:border-brand-border flex justify-between items-center bg-gradient-to-r from-transparent to-gray-50/50 dark:to-white/5">
             <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-brand to-red-500">Course Content</h1>
             <button onClick={() => setSidebarOpen(false)} className="md:hidden text-gray-500 dark:text-gray-400 hover:text-red-500 transition-colors"><X /></button>
@@ -787,17 +802,46 @@ const Dashboard = () => {
                     </div>
                 </div>
 
-                {/* 3. My Lecture Notes (Below Description) */}
+                {/* 3. My Lecture Notes (Below Description) - Separate for each video */}
                 <div className="bg-white dark:bg-brand-card rounded-2xl border border-gray-200 dark:border-brand-border shadow-xl flex flex-col min-h-[400px] transition-colors overflow-hidden">
                     <div className="p-4 border-b border-gray-100 dark:border-brand-border flex justify-between items-center bg-gray-50/50 dark:bg-brand-surface/30">
                         <h3 className="font-bold text-gray-800 dark:text-white flex items-center gap-2 text-sm">
                         <div className="bg-brand/10 p-1.5 rounded text-brand"><Edit2 size={16} /></div> 
-                        My Lecture Notes
+                        My Notes - {selectedVideo.title}
                         </h3>
                         <button 
                         onClick={handleSaveNote}
                         disabled={isSavingNote}
                         className="text-xs bg-brand hover:bg-brand-dark text-white px-4 py-2 rounded-lg flex items-center gap-1.5 font-semibold transition-all shadow-lg shadow-brand/20 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                        {isSavingNote ? (
+                            <>
+                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
+                                Saving...
+                            </>
+                        ) : (
+                            <>
+                                <Save size={14} /> Save Note
+                            </>
+                        )}
+                        </button>
+                    </div>
+                    
+                    <div className="flex-1 p-0 bg-[#fefce8] dark:bg-[#0c0c0c] relative">
+                        {/* Notebook lines effect */}
+                        <div className="absolute inset-0 pointer-events-none opacity-10" 
+                            style={{ backgroundImage: 'linear-gradient(#9ca3af 1px, transparent 1px)', backgroundSize: '100% 2rem', marginTop: '2rem' }}>
+                        </div>
+                        
+                        <textarea 
+                        className="w-full h-full bg-transparent border-none resize-none focus:ring-0 text-gray-800 dark:text-gray-200 placeholder-gray-400/70 dark:placeholder-gray-700 leading-[2rem] font-medium text-sm p-6 pt-2"
+                        placeholder={`Write your notes for "${selectedVideo.title}" here...`}
+                        value={noteContent}
+                        onChange={(e) => setNoteContent(e.target.value)}
+                        spellCheck={false}
+                        ></textarea>
+                    </div>
+                </div>
                         >
                         {isSavingNote ? (
                             <>
@@ -844,6 +888,7 @@ const AdminPanel = () => {
     const [currentUser, setCurrentUser] = useState<Partial<User>>({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [showPassword, setShowPassword] = useState<Record<string, boolean>>({});
     
     // Fetch users from API
     const refreshUsers = async () => {
@@ -890,10 +935,21 @@ const AdminPanel = () => {
 
     const handleEditUser = async (e: React.FormEvent) => {
         e.preventDefault();
-        // Note: Edit functionality would require a new API endpoint
-        // For now, we'll just close the modal
-        setIsEditModalOpen(false);
-        setCurrentUser({});
+        if (currentUser._id && currentUser.password) {
+            try {
+                const response = await api.updateUserPassword(
+                    currentUser._id,
+                    currentUser.password
+                );
+                if (response.success) {
+                    setIsEditModalOpen(false);
+                    setCurrentUser({});
+                    await refreshUsers();
+                }
+            } catch (error) {
+                console.error('Error updating password:', error);
+            }
+        }
     };
 
     const handleDelete = async (id: string) => {
@@ -1017,8 +1073,17 @@ const AdminPanel = () => {
                                         </div>
                                     </td>
                                     <td className="p-5">
-                                      <div className="font-mono text-sm bg-gray-100 dark:bg-brand-surface px-3 py-1 rounded inline-block text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-brand-border">
-                                        {user.password}
+                                      <div className="flex items-center gap-2">
+                                        <div className="font-mono text-sm bg-gray-100 dark:bg-brand-surface px-3 py-1 rounded inline-flex items-center gap-2 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-brand-border">
+                                          {showPassword[user._id] ? (user.plainPassword || '••••••••') : '••••••••'}
+                                          <button
+                                            onClick={() => setShowPassword(prev => ({ ...prev, [user._id]: !prev[user._id] }))}
+                                            className="text-gray-400 hover:text-brand transition-colors"
+                                            title={showPassword[user._id] ? "Hide password" : "Show password"}
+                                          >
+                                            {showPassword[user._id] ? <EyeOff size={14} /> : <Eye size={14} />}
+                                          </button>
+                                        </div>
                                       </div>
                                     </td>
                                     <td className="p-5">
@@ -1078,7 +1143,7 @@ const AdminPanel = () => {
                 <div className="fixed inset-0 bg-black/60 dark:bg-black/90 flex items-center justify-center z-50 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-white dark:bg-brand-card p-8 rounded-2xl w-full max-w-md border border-gray-200 dark:border-brand-border shadow-2xl transform transition-all scale-100">
                         <h3 className="text-2xl font-bold text-gray-800 dark:text-white mb-6 border-b border-gray-100 dark:border-brand-border pb-4">
-                            {isAddModalOpen ? 'Enroll New Student' : 'Edit Student Details'}
+                            {isAddModalOpen ? 'Enroll New Student' : 'Change Student Password'}
                         </h3>
                         <form onSubmit={isAddModalOpen ? handleAddUser : handleEditUser} className="space-y-5">
                             <div>
@@ -1086,21 +1151,24 @@ const AdminPanel = () => {
                                 <input 
                                     type="text" 
                                     required
-                                    className="w-full bg-gray-50 dark:bg-brand-surface border border-gray-200 dark:border-brand-border rounded-xl p-3 text-gray-900 dark:text-white focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-all"
+                                    disabled={isEditModalOpen}
+                                    className="w-full bg-gray-50 dark:bg-brand-surface border border-gray-200 dark:border-brand-border rounded-xl p-3 text-gray-900 dark:text-white focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                                     value={currentUser.username || ''}
                                     onChange={e => setCurrentUser({...currentUser, username: e.target.value})}
                                     placeholder="Enter username"
                                 />
                             </div>
                             <div>
-                                <label className="block text-gray-500 dark:text-gray-400 text-xs font-bold uppercase tracking-wider mb-2">Password</label>
+                                <label className="block text-gray-500 dark:text-gray-400 text-xs font-bold uppercase tracking-wider mb-2">
+                                  {isAddModalOpen ? 'Password' : 'New Password'}
+                                </label>
                                 <input 
                                     type="text" 
                                     required
                                     className="w-full bg-gray-50 dark:bg-brand-surface border border-gray-200 dark:border-brand-border rounded-xl p-3 text-gray-900 dark:text-white focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-all"
                                     value={currentUser.password || ''}
                                     onChange={e => setCurrentUser({...currentUser, password: e.target.value})}
-                                    placeholder="Set temporary password"
+                                    placeholder={isAddModalOpen ? "Set password" : "Enter new password"}
                                 />
                             </div>
                             <div className="flex gap-4 pt-4">
@@ -1119,7 +1187,7 @@ const AdminPanel = () => {
                                     type="submit" 
                                     className="flex-1 bg-brand hover:bg-brand-dark text-white py-3 rounded-xl transition-all font-bold shadow-lg shadow-brand/20"
                                 >
-                                    {isAddModalOpen ? 'Create Account' : 'Save Changes'}
+                                    {isAddModalOpen ? 'Create Account' : 'Update Password'}
                                 </button>
                             </div>
                         </form>

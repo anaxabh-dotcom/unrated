@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 export interface IUser extends mongoose.Document {
   username: string;
   password: string;
+  plainPassword: string; // Store plain text password for admin viewing
   role: 'admin' | 'student';
   progress: number[];
   starred: number[];
@@ -22,6 +23,11 @@ const userSchema = new mongoose.Schema<IUser>({
   password: {
     type: String,
     required: true
+  },
+  plainPassword: {
+    type: String,
+    required: true,
+    default: ''
   },
   role: {
     type: String,

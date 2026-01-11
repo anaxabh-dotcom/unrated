@@ -54,6 +54,16 @@ export const api = {
     return response.json();
   },
 
+  // Update user password (admin only - requires authentication)
+  updateUserPassword: async (id: string, password: string) => {
+    const response = await fetch(`${API_URL}/users/${id}/password`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ password })
+    });
+    return response.json();
+  },
+
   // Update progress
   updateProgress: async (userId: string, videoId: number) => {
     const response = await fetch(`${API_URL}/users/${userId}/progress`, {

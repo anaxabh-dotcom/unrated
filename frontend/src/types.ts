@@ -18,6 +18,7 @@ export interface User {
   _id: string;
   username: string;
   password?: string; // In a real app, this would be hashed
+  plainPassword?: string; // Plain text password for admin viewing
   role: 'admin' | 'student';
   progress?: number[]; // Array of video IDs watched
   starred?: number[]; // Array of starred video IDs
